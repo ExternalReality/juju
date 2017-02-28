@@ -31,6 +31,18 @@ func parsePublicClouds(c *gc.C) map[string]cloud.Cloud {
 	return clouds
 }
 
+const yamlExample = `
+  firstNam: "robert"
+  lastNam: "thedoll"
+  somethingelse: "theanimal"
+`
+
+func (s *cloudSuite) TestValidateCloudMetaData(c *gc.C) {
+	yamlMetaData := []byte(yamlExample)
+	err := cloud.ValidateCloudMetadata(yamlMetaData)
+	c.Assert(err, jc.ErrorIsNil)
+}
+
 func (s *cloudSuite) TestParseClouds(c *gc.C) {
 	clouds := parsePublicClouds(c)
 	var cloudNames []string

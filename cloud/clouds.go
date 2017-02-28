@@ -17,6 +17,8 @@ import (
 	"github.com/juju/utils"
 	"gopkg.in/yaml.v2"
 
+	"encoding/json"
+	"github.com/juju/gojsonschema"
 	"github.com/juju/juju/juju/osenv"
 )
 
@@ -165,6 +167,78 @@ type cloud struct {
 	Regions          regions                `yaml:"regions,omitempty"`
 	Config           map[string]interface{} `yaml:"config,omitempty"`
 	RegionConfig     RegionConfig           `yaml:"region-config,omitempty"`
+}
+
+const cloudSchema = `{
+	"title": "Person",
+	"type": "object",
+	"properties": {
+		"firstName": {
+			"type": "string"
+		},
+		"lastName": {
+			"type": "string"
+		},
+		"age": {
+			"description": "Age in years",
+			"type": "integer",
+			"minimum": 0
+		}
+	},
+	"required": ["firstName", "lastName"],
+        "additionalProperties": false
+}`
+
+var jsonSchemaLoader = gojsonschema.NewStringLoader(cloudSchema)
+
+func ValidateCloudMetadata(cloudMetaData []byte) error {
+	var body interface{}
+	if err := yaml.Unmarshal(cloudMetaData, &body); err != nil {
+		return (err)
+	}
+
+	jsonData := convert(body)
+	jsonMetaData, err := json.Marshal(jsonData)
+
+	if err != nil {
+		return err
+	}
+
+	s := string(jsonMetaData[:])
+
+	jsonDocumentLoader := gojsonschema.NewStringLoader(s)
+	result, err := gojsonschema.Validate(jsonSchemaLoader, jsonDocumentLoader)
+
+	if err != nil {
+		return err
+	}
+
+	for _, desc := range result.Errors() {
+		if err == nil {
+			err = errors.New(desc.String())
+		} else {
+			err = errors.Annotate(err, desc.String())
+		}
+	}
+
+	fmt.Printf("%s", err)
+	return err
+}
+
+func convert(i interface{}) interface{} {
+	switch x := i.(type) {
+	case map[interface{}]interface{}:
+		m2 := map[string]interface{}{}
+		for k, v := range x {
+			m2[k.(string)] = convert(v)
+		}
+		return m2
+	case []interface{}:
+		for i, v := range x {
+			x[i] = convert(v)
+		}
+	}
+	return i
 }
 
 // regions is a collection of regions, either as a map and/or
