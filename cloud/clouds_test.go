@@ -31,16 +31,40 @@ func parsePublicClouds(c *gc.C) map[string]cloud.Cloud {
 	return clouds
 }
 
-const yamlExample = `
-  firstNam: "robert"
-  lastNam: "thedoll"
-  somethingelse: "theanimal"
-`
+func (s *cloudSuite) TestValidateValidCloud(c *gc.C) {
+	validCloud := `
+          vmwarestack-trusty:
+            type: maas
+            auth-types: [oauth1]
+            endpoint: http://10.245.200.27/MAAS
+            config:
+              default-series: trusty
+              bootstrap-timeout: 900
+              http-proxy: http://10.245.200.27:8000/
+              https-proxy: http://10.245.200.27:8000/
+              no-proxy: 127.0.0.1,localhost,169.254.169.254,10.245.200.27`
 
-func (s *cloudSuite) TestValidateCloudMetaData(c *gc.C) {
-	yamlMetaData := []byte(yamlExample)
+	yamlMetaData := []byte(validCloud)
 	err := cloud.ValidateCloudMetadata(yamlMetaData)
 	c.Assert(err, jc.ErrorIsNil)
+}
+
+func (s *cloudSuite) TestValidateInvalidCloud(c *gc.C) {
+	invalidCloud := `
+          vmwarestack-trusty:
+            type: maas
+            auth-tpes: [oauth1]
+            endpoint: http://10.245.200.27/MAAS
+            config:
+              default-series: trusty
+              bootstrap-timeout: 900
+              http-proxy: http://10.245.200.27:8000/
+              https-proxy: http://10.245.200.27:8000/
+              no-proxy: 127.0.0.1,localhost,169.254.169.254,10.245.200.27`
+
+	yamlMetaData := []byte(invalidCloud)
+	err := cloud.ValidateCloudMetadata(yamlMetaData)
+	c.Assert(err, gc.ErrorMatches, "additional property \"auth-tpes\" is not allowed\n")
 }
 
 func (s *cloudSuite) TestParseClouds(c *gc.C) {

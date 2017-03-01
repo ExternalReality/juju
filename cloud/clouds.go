@@ -17,6 +17,7 @@ import (
 	"github.com/juju/utils"
 	"gopkg.in/yaml.v2"
 
+	"bytes"
 	"encoding/json"
 	"github.com/juju/gojsonschema"
 	"github.com/juju/juju/juju/osenv"
@@ -170,23 +171,46 @@ type cloud struct {
 }
 
 const cloudSchema = `{
-	"title": "Person",
 	"type": "object",
-	"properties": {
-		"firstName": {
-			"type": "string"
-		},
-		"lastName": {
-			"type": "string"
-		},
-		"age": {
-			"description": "Age in years",
-			"type": "integer",
-			"minimum": 0
+	"additionalProperties": {
+			"type": "object",
+			"properties": {
+				"name": {
+					"type": "string"
+				},
+				"type": {
+					"type": "string"
+				},
+				"description": {
+					"type": "string"
+				},
+				"auth-types": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"endpoint": {
+					"type": "string"
+				},
+				"identity-endpoint": {
+					"type": "string"
+				},
+				"storage-endpoint": {
+					"type": "string"
+				},
+				"regions": {
+					"type": "string"
+				},
+				"config": {
+					"type": "object"
+				},
+				"region-config": {
+					"type": "object"
+				}
+			},
+			"additionalProperties": false
 		}
-	},
-	"required": ["firstName", "lastName"],
-        "additionalProperties": false
 }`
 
 var jsonSchemaLoader = gojsonschema.NewStringLoader(cloudSchema)
@@ -197,7 +221,7 @@ func ValidateCloudMetadata(cloudMetaData []byte) error {
 		return (err)
 	}
 
-	jsonData := convert(body)
+	jsonData := yamlToJson(body)
 	jsonMetaData, err := json.Marshal(jsonData)
 
 	if err != nil {
@@ -213,29 +237,30 @@ func ValidateCloudMetadata(cloudMetaData []byte) error {
 		return err
 	}
 
+	var errMsgBuffer bytes.Buffer
 	for _, desc := range result.Errors() {
-		if err == nil {
-			err = errors.New(desc.String())
-		} else {
-			err = errors.Annotate(err, desc.String())
-		}
+		errMsgBuffer.WriteString(desc.Description)
+		errMsgBuffer.WriteString("\n")
 	}
 
-	fmt.Printf("%s", err)
-	return err
+	if errMsgBuffer.Len() > 0 {
+		return errors.New(errMsgBuffer.String())
+	}
+
+	return nil
 }
 
-func convert(i interface{}) interface{} {
+func yamlToJson(i interface{}) interface{} {
 	switch x := i.(type) {
 	case map[interface{}]interface{}:
 		m2 := map[string]interface{}{}
 		for k, v := range x {
-			m2[k.(string)] = convert(v)
+			m2[k.(string)] = yamlToJson(v)
 		}
 		return m2
 	case []interface{}:
 		for i, v := range x {
-			x[i] = convert(v)
+			x[i] = yamlToJson(v)
 		}
 	}
 	return i
