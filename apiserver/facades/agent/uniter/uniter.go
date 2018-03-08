@@ -52,9 +52,13 @@ type UniterAPI struct {
 	accessUnit        common.GetAuthFunc
 	accessApplication common.GetAuthFunc
 	accessMachine     common.GetAuthFunc
-	accessCloudSpec   common.GetAuthFunc
-	cloudSpec         cloudspec.CloudSpecAPI
 	*StorageAPI
+
+	// A cloud spec can only be accessed for the model of the unit or
+	// application that is authorised for this API facade.
+	// We do not need to use an AuthFunc, because we do not need to pass a tag.
+	accessCloudSpec func() (func() bool, error)
+	cloudSpec       cloudspec.CloudSpecAPI
 }
 
 // UniterAPIV7 adds CMR support to NetworkInfo.
@@ -159,39 +163,34 @@ func NewUniterAPI(st *state.State, resources facade.Resources, authorizer facade
 			return nil, errors.Errorf("expected names.UnitTag or names.ApplicationTag, got %T", tag)
 		}
 	}
-	accessCloudSpec := func() (common.AuthFunc, error) {
+	accessCloudSpec := func() (func() bool, error) {
+		var appName string
+		var err error
+
 		switch tag := authorizer.GetAuthTag().(type) {
 		case names.ApplicationTag:
-			app, err := st.Application(tag.String())
-			if err != nil {
-				return nil, errors.Trace(err)
-			}
-			config, err := app.ApplicationConfig()
-			if err != nil {
-				return nil, errors.Trace(err)
-			}
-			return func(tag names.Tag) bool {
-				return tag == app.Tag() && config.GetBool("trust", false)
-			}, nil
+			appName = tag.String()
 		case names.UnitTag:
 			entity, err := st.Unit(tag.Id())
 			if err != nil {
 				return nil, errors.Trace(err)
 			}
-			app, err := st.Application(entity.ApplicationName())
-			if err != nil {
-				return nil, errors.Trace(err)
-			}
-			config, err := app.ApplicationConfig()
-			if err != nil {
-				return nil, errors.Trace(err)
-			}
-			return func(tag names.Tag) bool {
-				return tag == app.Tag() && config.GetBool("trust", false)
-			}, nil
+			appName = entity.ApplicationName()
 		default:
 			return nil, errors.Errorf("expected names.UnitTag or names.ApplicationTag, got %T", tag)
 		}
+
+		app, err := st.Application(appName)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		config, err := app.ApplicationConfig()
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		return func() bool {
+			return config.GetBool("trust", false)
+		}, nil
 	}
 
 	m, err := st.Model()
@@ -2482,29 +2481,18 @@ func (u *UniterAPI) GoalStates(args params.Entities) (string, error) {
 	return result.Results[0].Result, nil
 }
 
-// GetCloudSpec returns the cloud spec used by the model in which the input
-// application resides.
-// A check is made beforehand to ensure that the requesting application has
-// been granted the appropriate trust.
-func (u *UniterAPI) CloudSpec(args params.Entities) (params.CloudSpecResults, error) {
+// GetCloudSpec returns the cloud spec used by the model in which the
+// authenticated unit or application resides.
+// A check is made beforehand to ensure that the request is made by an entity
+// that has been granted the appropriate trust.
+func (u *UniterAPI) CloudSpec() (params.CloudSpecResult, error) {
 	canAccess, err := u.accessCloudSpec()
 	if err != nil {
-		return params.CloudSpecResults{}, err
+		return params.CloudSpecResult{}, err
+	}
+	if !canAccess() {
+		return params.CloudSpecResult{Error: common.ServerError(common.ErrPerm)}, nil
 	}
 
-	result := params.CloudSpecResults{Results: make([]params.CloudSpecResult, len(args.Entities))}
-	for i, entity := range args.Entities {
-		tag, err := names.ParseApplicationTag(entity.Tag)
-		if err != nil {
-			result.Results[i].Error = common.ServerError(common.ErrPerm)
-			continue
-		}
-		if !canAccess(tag) {
-			result.Results[i].Error = common.ServerError(common.ErrPerm)
-			continue
-		}
-		result.Results[i] = u.cloudSpec.GetCloudSpec(u.m.Tag().(names.ModelTag))
-	}
-
-	return result, nil
+	return u.cloudSpec.GetCloudSpec(u.m.Tag().(names.ModelTag)), nil
 }
